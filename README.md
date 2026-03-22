@@ -1,11 +1,27 @@
-<div align="center">
+# Sysext Manager Dashboard
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+Moderní grafické rozhraní pro správu systémových rozšíření (systemd-sysext) na Fedora Atomic Desktop.
 
-  <h1>Built with AI Studio</h2>
+## Funkce
+- **Extensions**: Přehled nainstalovaných rozšíření.
+- **Update**: Kontrola a instalace aktualizací pro jednotlivé sysext balíčky.
+- **Search**: Vyhledávání balíčků v Fedora repozitářích.
+- **Doctor**: Diagnostika zdraví systému a spojení s démonem.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Technologie
+- **Frontend**: React, Tailwind CSS, Lucide Icons, Motion.
+- **Backend**: Express.js (slouží jako API bridge k Varlink socketu).
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Jak spustit lokálně
+1. Nainstalujte závislosti:
+   ```bash
+   npm install
+   ```
+2. Spusťte vývojový server:
+   ```bash
+   npm run dev
+   ```
+3. Aplikace bude dostupná na `http://localhost:3000`.
 
-</div>
+## Propojení s démonem
+Tento projekt je připraven pro komunikaci s `sysext-creator-daemon` přes Varlink protokol. V souboru `server.ts` je připraveno API, které stačí propojit se skutečným unix socketem `/run/sysext-creator/sysext-creator.sock`.

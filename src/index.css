@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme {
+  --font-mono: 'JetBrains Mono', 'Roboto Mono', monospace;
+  --font-sans: 'Inter', system-ui, sans-serif;
+}
+
+:root {
+  --bg: #E4E3E0;
+  --ink: #141414;
+  --line: #141414;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+}
+
+/* Visible grid borders—don't hide the structure, celebrate it */
+.data-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 80px;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.data-row:hover {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+/* Italic serif column headers—humanizes the data */
+.col-header {
+  font-family: 'Georgia', serif;
+  font-style: italic;
+  font-size: 11px;
+  opacity: 0.5;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Monospace for data values—signals precision */
+.data-value {
+  font-family: var(--font-mono);
+  letter-spacing: -0.02em;
+}
+
+.btn-tech {
+  border: 1px solid var(--ink);
+  padding: 4px 12px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.2s;
+}
+
+.btn-tech:hover {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.tab-active {
+  background: var(--ink);
+  color: var(--bg);
+}
+
+.tab-inactive {
+  border: 1px solid var(--ink);
+}
