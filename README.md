@@ -12,6 +12,21 @@ Moderní grafické rozhraní pro správu systémových rozšíření (systemd-sy
 - **Frontend**: React, Tailwind CSS, Lucide Icons, Motion.
 - **Backend**: Express.js (slouží jako API bridge k Varlink socketu).
 
+## Instalace na hostitelský systém
+Projekt obsahuje instalační skript `install.sh`, který nastaví binárky, vytvoří systemd službu a připraví prostředí:
+
+```bash
+# Spuštění instalace (vyžaduje sudo)
+chmod +x install.sh
+./install.sh
+```
+
+Skript provede následující:
+1.  Zkopíruje skripty do `/usr/local/bin/`.
+2.  Nastaví **Drop-Zone** (`/var/tmp/sysext-creator`) se Sticky Bitem pro bezpečný přenos obrazů z toolboxu.
+3.  Vytvoří a spustí **systemd službu** `sysext-creator.service`.
+4.  Předpřipraví toolbox kontejner `sysext-builder`.
+
 ## Python Nástroje (Lokální)
 Kromě webového rozhraní projekt obsahuje sadu Python skriptů pro přímou správu na hostitelském systému:
 

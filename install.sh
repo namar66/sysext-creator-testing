@@ -1,112 +1,80 @@
 #!/bin/bash
 
-# Sysext-Creator Ultimate Installer v2.1
+# Sysext-Creator Installer v13.7
 # Features: Sticky-Bit Drop-Zone, Hardened Systemd Service
 
 set -e
 
-# Cesty
-OPT_DIR="/opt/sysext-creator"
-BIN_DIR="/usr/local/bin"
-USER_BIN_DIR="$HOME/.local/bin"
-SYSTEMD_SYS_DIR="/etc/systemd/system"
-SYSTEMD_USR_DIR="$HOME/.config/systemd/user"
-EXT_DIR="/var/lib/extensions"
-BUILD_OUTPUT="/var/tmp/sysext-creator/sysext-creator.raw"
-ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
-APP_DIR="$HOME/.local/share/applications"
-COMPLETION_DIR="$HOME/.local/share/bash-completion/completions/"
-USER_KIO_DIR="$HOME/.local/share/kio/servicemenus/"
+# --- KONFIGURACE ---
+INSTALL_DIR="/usr/local/bin"
+SERVICE_DIR="/etc/systemd/system"
+DROP_ZONE="/var/tmp/sysext-creator"
+SOCKET_DIR="/run/sysext-creator"
 
-case "$1" in
-    uninstall|remove|--uninstall)
-        echo "=== Uninstalling Sysext-Creator ==="
-        sudo systemctl disable --now sysext-creator-daemon.service 2>/dev/null || true
-        systemctl --user disable --now sysext-autoupdater.timer 2>/dev/null || true
+# --- CESTY K SOUBORŮM (Z aktuálního adresáře) ---
+DAEMON_SRC="sysext-daemon.py"
+BUILDER_SRC="sysext-builder.py"
+CLI_SRC="sysext-cli.py"
+UPDATER_SRC="sysext-updater.py"
+DOCTOR_SRC="sysext-doctor.py"
+GUI_SRC="sysext-gui.py"
 
-        sudo rm -rf "$OPT_DIR"
-        sudo rm -f "$BIN_DIR/sysext-creator-builder.py" "$BIN_DIR/sysext-cli"
-        rm -f "$USER_BIN_DIR/sysext-creator-gui" "$USER_BIN_DIR/sysext-autoupdater.py"
-        rm -f "$APP_DIR/sysext-creator.desktop" "$ICON_DIR/sysext-creator.png"
-
-        sudo rm -f "$SYSTEMD_SYS_DIR/sysext-creator-daemon.service"
-        rm -f "$SYSTEMD_USR_DIR/sysext-autoupdater.service" "$SYSTEMD_USR_DIR/sysext-autoupdater.timer"
-
-        sudo systemctl daemon-reload
-        systemctl --user daemon-reload
-        echo "=== Uninstallation Completed! ==="
-        echo "Note: Extensions in /var/tmp/sysext-creator and $EXT_DIR were kept."
-        exit 0
-        ;;
-esac
-
-echo "=== Sysext-Creator Setup v2.1 ==="
-
-# Kontrola souborů
-REQUIRED_FILES=("sysext-creator-daemon.py" "sysext-creator-builder.py" "sysext-cli.py" "sysext-creator-gui.py" "sysext-autoupdater.py" "sysext-creator-install.desktop" "sysext-cli.bash")
-for file in "${REQUIRED_FILES[@]}"; do
-    if [ ! -f "$file" ]; then echo "Error: Missing $file"; exit 1; fi
+# --- KONTROLA SOUBORŮ ---
+for f in "$DAEMON_SRC" "$BUILDER_SRC" "$CLI_SRC" "$UPDATER_SRC" "$DOCTOR_SRC" "$GUI_SRC"; do
+    if [ ! -f "$f" ]; then
+        echo "Error: Missing $f in current directory."
+        exit 1
+    fi
 done
 
-mkdir -p "$USER_BIN_DIR" "$SYSTEMD_USR_DIR"
+# add -f for rewrite files
+echo ">>> Phase 1: Installing Binaries to $INSTALL_DIR"
+sudo cp -f "$DAEMON_SRC" "$INSTALL_DIR/sysext-creator-daemon.py"
+sudo cp -f "$BUILDER_SRC" "$INSTALL_DIR/sysext-creator-builder.py"
+sudo cp -f "$CLI_SRC" "$INSTALL_DIR/sysext-creator-cli.py"
+sudo cp -f "$UPDATER_SRC" "$INSTALL_DIR/sysext-updater.py"
+sudo cp -f "$DOCTOR_SRC" "$INSTALL_DIR/sysext-doctor.py"
+sudo cp -f "$GUI_SRC" "$INSTALL_DIR/sysext-gui.py"
 
-# --- BEZPEČNOSTNÍ NASTAVENÍ DROP-ZONE ---
-echo "[1/9] Setting up Secure Drop-Zone..."
-sudo mkdir -p /var/tmp/sysext-creator
-sudo chmod 1777 /var/tmp/sysext-creator # Každý může psát, jen majitel mazat
+sudo chmod +x "$INSTALL_DIR"/sysext-creator-*.py
+sudo chmod +x "$INSTALL_DIR"/sysext-updater.py
+sudo chmod +x "$INSTALL_DIR"/sysext-doctor.py
+sudo chmod +x "$INSTALL_DIR"/sysext-gui.py
 
-echo "[2/9] Setting up Toolbox container..."
-if ! podman container exists sysext-builder; then
-    toolbox create -c sysext-builder
-fi
+# Symlink pro CLI
+sudo ln -sf "$INSTALL_DIR/sysext-creator-cli.py" "$INSTALL_DIR/sysext-cli"
 
-echo "[3/9] Copying scripts..."
-sudo mkdir -p "$OPT_DIR"
-sudo cp -f sysext-creator-daemon.py "$OPT_DIR/"
-sudo chmod +x "$OPT_DIR/sysext-creator-daemon.py"
+echo ">>> Phase 2: Setting up Drop-Zone (Sticky Bit)"
+# DROP-ZONE: Místo, kam uživatel (toolbox) zapisuje .raw obrazy
+# Sticky bit (1777) zajistí, že uživatelé si nemohou mazat soubory navzájem
+sudo mkdir -p "$DROP_ZONE"
+sudo chmod 1777 "$DROP_ZONE"
 
-sudo cp -f sysext-creator-builder.py "$BIN_DIR/"
-sudo chmod +x "$BIN_DIR/sysext-creator-builder.py"
-
-sudo cp -f sysext-cli.py "$BIN_DIR/sysext-cli"
-sudo chmod +x "$BIN_DIR/sysext-cli"
-
-cp -f sysext-creator-gui.py "$USER_BIN_DIR/sysext-creator-gui"
-chmod +x "$USER_BIN_DIR/sysext-creator-gui"
-
-cp -f sysext-autoupdater.py "$USER_BIN_DIR/"
-chmod +x "$USER_BIN_DIR/sysext-autoupdater.py"
-
-echo "[4/9] Building core dependencies..."
-toolbox run -c sysext-builder python3 "/run/host$BIN_DIR/sysext-creator-builder.py" sysext-creator-deps python3-varlink python3-pyqt6 erofs-utils
-
-echo "[5/9] Deploying dependency layer..."
-sudo mkdir -p "$EXT_DIR"
-sudo cp "/var/tmp/sysext-creator/sysext-creator-deps.raw" "$EXT_DIR/sysext-creator-deps.raw"
-sudo restorecon -v "$EXT_DIR/sysext-creator-deps.raw"
-sudo systemd-sysext refresh
-sudo rm /var/tmp/sysext-creator/sysext-creator-deps.raw
-echo "[6/9] Configuring Hardened Daemon Service..."
-cat <<EOF | sudo tee "$SYSTEMD_SYS_DIR/sysext-creator-daemon.service" > /dev/null
+echo ">>> Phase 3: Creating Systemd Service"
+sudo tee "$SERVICE_DIR/sysext-creator.service" > /dev/null <<EOF
 [Unit]
 Description=Sysext Creator Daemon
-After=network.target systemd-sysext.service
+After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 $OPT_DIR/sysext-creator-daemon.py
-Restart=on-failure
+ExecStart=/usr/bin/python3 $INSTALL_DIR/sysext-creator-daemon.py
+Restart=always
+User=root
+Group=wheel
 
-# KLÍČOVÉ PRO REFRESH:
-# Sdílení mount namespace s hostitelem
+# --- BEZPEČNOSTNÍ NASTAVENÍ ---
+RuntimeDirectory=sysext-creator
+RuntimeDirectoryMode=0770
+
+# Sdílení mount namespace s hostitelem (nutné pro systemd-sysext refresh)
 MountFlags=shared
+
 # Oprávnění pro mount operace
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_DAC_OVERRIDE CAP_FOWNER CAP_CHOWN CAP_SETGID
-AmbientCapabilities=CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 
 # Vypnutí izolace, která by mohla bránit v přístupu k /usr
-PrivateMounts=no
-PrivateTmp=no
 ProtectSystem=no
 ProtectHome=no
 
@@ -114,47 +82,75 @@ ProtectHome=no
 WantedBy=multi-user.target
 EOF
 
+echo ">>> Phase 4: Reloading Systemd & Starting Service"
 sudo systemctl daemon-reload
-sudo systemctl enable --now sysext-creator-daemon.service
+sudo systemctl enable --now sysext-creator.service
 
-echo "[7/9] Configuring Auto-Updater..."
-cat <<EOF | tee "$SYSTEMD_USR_DIR/sysext-autoupdater.service" > /dev/null
-[Unit]
-Description=Sysext Creator Auto-Updater
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 $USER_BIN_DIR/sysext-autoupdater.py
-EOF
-
-cat <<EOF | tee "$SYSTEMD_USR_DIR/sysext-autoupdater.timer" > /dev/null
-[Unit]
-Description=Weekly Timer for Sysext Auto-Updater
-[Timer]
-OnCalendar=Mon *-*-* 06:00:00
-Persistent=true
-[Install]
-WantedBy=timers.target
-EOF
-
-systemctl --user daemon-reload
-systemctl --user enable --now sysext-autoupdater.timer
-
-echo "[8/9] Desktop Integration..."
-mkdir -p "$APP_DIR"
-cat <<EOF > "$APP_DIR/sysext-creator.desktop"
-[Desktop Entry]
-Name=Sysext Creator
-Exec=$USER_BIN_DIR/sysext-creator-gui
-Icon=sysext-creator
-Terminal=false
-Type=Application
-Categories=System;Utility;
-EOF
-
-echo "[9/9] Bash Completion..."
-if [ -d "$COMPLETION_DIR" ]; then
-    sudo cp sysext-cli.bash "$COMPLETION_DIR/sysext-cli"
-    sudo chmod 644 "$COMPLETION_DIR/sysext-cli"
+echo ">>> Phase 5: Initializing Toolbox Container"
+# Vytvoříme kontejner dopředu, aby GUI nemuselo čekat
+if ! podman container exists sysext-builder; then
+    echo "Creating 'sysext-builder' toolbox container..."
+    toolbox create -y -c sysext-builder
 fi
 
-echo "=== Installation Completed Successfully! ==="
+echo ">>> Phase 6: Web Interface (Optional)"
+read -p "Do you want to install and start the Web Interface? (y/N): " install_web
+if [[ "$install_web" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+    echo "Installing Web Interface dependencies..."
+    if [ -f "package.json" ]; then
+        npm install
+        echo "Building Web Interface..."
+        npm run build
+        
+        echo "Creating systemd service for Web Interface..."
+        sudo tee "$SERVICE_DIR/sysext-web.service" > /dev/null <<EOF
+[Unit]
+Description=Sysext Creator Web Interface
+After=sysext-creator.service
+
+[Service]
+Type=simple
+WorkingDirectory=$(pwd)
+ExecStart=/usr/bin/npm start
+Restart=always
+User=$(whoami)
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        sudo systemctl daemon-reload
+        sudo systemctl enable --now sysext-web.service
+        echo "Web Interface is now running at http://localhost:3000"
+    else
+        echo "Warning: package.json not found. Skipping web interface installation."
+    fi
+fi
+
+echo ">>> Phase 07: Checking System Dependencies (Node.js, PyQt6)"
+# Kontrola a instalace npm (Node.js) a PyQt6 pro GUI
+if ! command -v npm &> /dev/null; then
+    echo "npm not found. Installing nodejs..."
+    if command -v sysext-cli &> /dev/null; then
+        sysext-cli install nodejs
+    else
+        echo "Warning: sysext-cli not found. Please install nodejs/npm manually."
+    fi
+fi
+
+if ! python3 -c "import PyQt6" &> /dev/null; then
+    echo "PyQt6 not found. Installing python3-pyqt6..."
+    if command -v sysext-cli &> /dev/null; then
+        sysext-cli install python3-pyqt6
+    else
+        echo "Warning: sysext-cli not found. Please install python3-pyqt6 manually."
+    fi
+fi
+
+echo "--------------------------------------------------"
+echo "✅ Installation Complete!"
+echo "Daemon is running. You can now use:"
+echo " - 'sysext-cli list' (CLI)"
+echo " - './sysext-gui.py' (GUI)"
+echo " - 'sudo sysext-doctor.py' (Diagnostics)"
+echo "--------------------------------------------------"

@@ -8,29 +8,60 @@ import os
 import argparse
 import subprocess
 import warnings
+import json
+import socket
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
-try:
-    import varlink
-except ImportError:
-    print("Error: python3-varlink is missing.")
-    sys.exit(1)
-
-SOCKET_ADDRESS = "unix:/run/sysext-creator/sysext-creator.sock"
+SOCKET_ADDRESS = "/run/sysext-creator/sysext-creator.sock"
 INTERFACE = "io.sysext.creator"
 BUILDER_SCRIPT = "/usr/local/bin/sysext-creator-builder.py"
 BUILD_DIR = Path("/var/tmp/sysext-creator")
 CONTAINER_NAME = "sysext-builder"
 
+class NativeVarlinkClient:
+    def __init__(self, socket_path):
+        self.socket_path = socket_path
+        self.sock = None
+
+    def __enter__(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            self.sock.connect(self.socket_path)
+        except Exception as e:
+            print(f"Error: Daemon not reachable at {self.socket_path} ({e})")
+            sys.exit(1)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.sock:
+            self.sock.close()
+
+    def call(self, method, **params):
+        req = {
+            "method": f"{INTERFACE}.{method}",
+            "parameters": params
+        }
+        self.sock.sendall(json.dumps(req).encode('utf-8') + b'\0')
+        
+        buffer = b""
+        while True:
+            chunk = self.sock.recv(4096)
+            if not chunk:
+                break
+            buffer += chunk
+            if b'\0' in buffer:
+                msg, _ = buffer.split(b'\0', 1)
+                resp = json.loads(msg.decode('utf-8'))
+                if "error" in resp:
+                    print(f"Error from daemon: {resp['error']}")
+                    return {}
+                return resp.get("parameters", {})
+        return {}
+
 def connect():
-    try:
-        client = varlink.Client(address=SOCKET_ADDRESS)
-        return client.open(INTERFACE)
-    except Exception as e:
-        print(f"Error: Daemon not reachable ({e})")
-        sys.exit(1)
+    return NativeVarlinkClient(SOCKET_ADDRESS)
 
 def get_package_version(pkg_name_or_path):
     """Zjistí verzi balíčku z RPM nebo z repozitáře (v toolboxu)."""
@@ -50,7 +81,7 @@ def get_package_version(pkg_name_or_path):
 
 def cmd_list(args):
     with connect() as remote:
-        res = remote.ListExtensions()
+        res = remote.call("ListExtensions")
         exts = res.get("extensions", [])
         if not exts:
             print("No extensions active.")
@@ -62,7 +93,7 @@ def cmd_list(args):
 
 def cmd_remove(args):
     with connect() as remote:
-        remote.RemoveSysext(args.name)
+        remote.call("RemoveSysext", name=args.name)
         print(f"Extension '{args.name}' removed.")
 
 def cmd_install(args):
@@ -83,7 +114,7 @@ def cmd_install(args):
     # --- KONTROLA VERZE ---
     print(f"Checking version for '{name}'...")
     with connect() as remote:
-        res = remote.ListExtensions()
+        res = remote.call("ListExtensions")
         current_ext = next((e for e in res.get("extensions", []) if e['name'] == name), None)
 
         if current_ext:
@@ -114,7 +145,7 @@ def cmd_install(args):
     with connect() as remote:
         p = BUILD_DIR / f"{name}.raw"
         if p.exists():
-            res = remote.DeploySysext(name, str(p), args.force)
+            res = remote.call("DeploySysext", name=name, path=str(p), force=args.force)
             if res.get("status") == "Success":
                 print("\n✅ Done! Extension is now active.")
             else:
