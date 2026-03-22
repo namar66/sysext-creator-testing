@@ -90,7 +90,18 @@ def main():
     
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.bind(SOCKET_PATH)
-    os.chmod(SOCKET_PATH, 0o666) # Allow web user to connect
+    
+    # Restrict access to root and wheel group
+    try:
+        import grp
+        wheel_gid = grp.getgrnam('wheel').gr_gid
+        os.chown(SOCKET_PATH, 0, wheel_gid)
+        os.chmod(SOCKET_PATH, 0o660)
+        logging.info(f"Socket permissions set to 0660 (root:wheel)")
+    except Exception as e:
+        logging.warning(f"Could not set socket permissions to root:wheel: {e}")
+        os.chmod(SOCKET_PATH, 0o666) # Fallback to more permissive if wheel group doesn't exist
+    
     server.listen(5)
     
     logging.info(f"Daemon started, listening on {SOCKET_PATH}")
