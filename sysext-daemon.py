@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator Daemon v10.5 - Native Protocol Mode
+# Sysext-Creator Daemon v3.1-rc2 - Native Protocol Mode
 # Fixes: Added missing 'import time' and systemd-tmpfiles sync
 
 import os
@@ -244,7 +244,7 @@ class VarlinkNativeHandler(socketserver.StreamRequestHandler):
                     method = req.get("method", "")
                     params = req.get("parameters", {})
                     if method == "org.varlink.service.GetInfo":
-                        resp = {"parameters": {"vendor": "Sysext Project", "product": "Sysext Creator", "version": "10.5", "interfaces": ["org.varlink.service", INTERFACE_NAME]}}
+                        resp = {"parameters": {"vendor": "Sysext Project", "product": "Sysext Creator", "version": "3.1-rc2", "interfaces": ["org.varlink.service", INTERFACE_NAME]}}
                     elif method == "org.varlink.service.GetInterfaceDescription":
                         resp = {"parameters": {"description": INTERFACE_DEFINITION}}
                     elif method == f"{INTERFACE_NAME}.ListExtensions":
@@ -273,7 +273,7 @@ class ThreadedUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSer
 def run_server():
     os.makedirs(RUN_DIR, exist_ok=True)
     if os.path.exists(SOCKET_PATH): os.remove(SOCKET_PATH)
-    logging.info("Daemon v10.5 starting (Native Mode) on %s", SOCKET_PATH)
+    logging.info("Daemon v3.1-rc2 starting (Native Mode) on %s", SOCKET_PATH)
     with ThreadedUnixServer(SOCKET_PATH, VarlinkNativeHandler) as server:
         os.chmod(SOCKET_PATH, 0o660)
         try:

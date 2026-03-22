@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator CLI v3.7
+# Sysext-Creator CLI v3.1-rc2
 # Fixes: Robust version checking using dnf repoquery
 
 import sys

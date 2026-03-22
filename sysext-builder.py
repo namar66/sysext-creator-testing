@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator Builder v4.8
+# Sysext-Creator Builder v3.1-rc2
 # Fixes: Automatic /etc migration via tmpfiles.d
 
 import os

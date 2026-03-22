@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator GUI v4.5 - Fedora Atomic Desktop
+# Sysext-Creator GUI v3.1-rc2 - Fedora Atomic Desktop
 # Tabs: Manager, Creator, Doctor, Search, Updater
 
 import sys
@@ -84,7 +84,7 @@ class SysextManagerGUI(QWidget):
         return worker
 
     def init_ui(self):
-        self.setWindowTitle("Sysext Manager Pro v4.5")
+        self.setWindowTitle("Sysext Creator v3.1-rc2")
         self.setMinimumSize(1000, 750)
         self.setStyleSheet("""
             QWidget { background-color: #f5f5f5; font-family: 'Segoe UI', sans-serif; }

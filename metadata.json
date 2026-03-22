@@ -1,5 +1,5 @@
 {
   "name": "Sysext-Creator",
-  "description": "",
+  "description": "Powerful tool for creating and managing System Extensions (sysext) on Fedora Atomic Desktops.",
   "requestFramePermissions": []
 }

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Sysext-Creator Installer v13.7
+# Sysext-Creator Installer v3.1-rc2
 # Features: Sticky-Bit Drop-Zone, Hardened Systemd Service
 
 set -e
@@ -55,7 +55,7 @@ case "$1" in
         ;;
 esac
 
-echo "=== Sysext-Creator Setup v2.1 ==="
+echo "=== Sysext-Creator Setup v3.1-rc2 ==="
 
 # --- FILE CHECK ---
 for f in "$DAEMON_SRC" "$BUILDER_SRC" "$CLI_SRC" "$UPDATER_SRC" "$DOCTOR_SRC" "$GUI_SRC" "$KIO_SERVICE_MENU_INSTALL" "$GUI_DESKTOP_INSTALL"; do
@@ -157,8 +157,9 @@ if ! podman container exists sysext-builder; then
 fi
 
 
-echo ">>> Phase 6: Web Interface (Optional)"
-read -p "Do you want to install and start the Web Interface? (y/N): " install_web
+echo ">>> Phase 6: Web Interface (Disabled for v3.1-rc2)"
+install_web="n"
+# read -p "Do you want to install and start the Web Interface? (y/N): " install_web
 if [[ "$install_web" =~ ^([yY][eE][sS]|[yY])$ ]]; then
 echo ">>> Phase 6.1: Checking System Dependencies (Node.js)"
 # Check and install npm (Node.js)
