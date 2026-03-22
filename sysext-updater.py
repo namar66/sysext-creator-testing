@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator Auto-Updater v3.1-rc2
+# Sysext-Creator Auto-Updater v3.1
 # Fixes: Version-aware updates (only rebuilds if newer version exists)
 
 import sys

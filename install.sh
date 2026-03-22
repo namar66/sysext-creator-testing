@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Sysext-Creator Installer v3.1-rc2
+# Sysext-Creator Installer v3.1
 # Features: Sticky-Bit Drop-Zone, Hardened Systemd Service
 
 set -e
@@ -56,7 +56,7 @@ case "$1" in
         ;;
 esac
 
-echo "=== Sysext-Creator Setup v3.1-rc2 ==="
+echo "=== Sysext-Creator Setup v3.1 ==="
 
 # --- FILE CHECK ---
 for f in "$DAEMON_SRC" "$BUILDER_SRC" "$CLI_SRC" "$UPDATER_SRC" "$DOCTOR_SRC" "$GUI_SRC" "$KIO_SERVICE_MENU_INSTALL" "$GUI_DESKTOP_INSTALL" "$BASH_COMPLETION_SRC"; do
@@ -163,7 +163,7 @@ if ! podman container exists sysext-builder; then
 fi
 
 
-echo ">>> Phase 6: Web Interface (Disabled for v3.1-rc2)"
+echo ">>> Phase 6: Web Interface (Disabled for v3.1)"
 install_web="n"
 # read -p "Do you want to install and start the Web Interface? (y/N): " install_web
 if [[ "$install_web" =~ ^([yY][eE][sS]|[yY])$ ]]; then

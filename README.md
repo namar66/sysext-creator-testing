@@ -1,4 +1,4 @@
-# Sysext Manager Dashboard (v3.1-rc2)
+# Sysext Manager Dashboard (v3.1)
 
 A modern graphical interface and toolset for managing system extensions (`systemd-sysext`) on Fedora Atomic Desktops (Silverblue, Kinoite, etc.).
 
@@ -54,7 +54,7 @@ chmod +x install.sh
 2.  Sets up the **Drop-Zone** (`/var/tmp/sysext-creator`) with a Sticky Bit (1777).
 3.  Creates and starts the **systemd service** `sysext-creator.service`.
 4.  Pre-configures the `sysext-builder` toolbox container.
-5.  *Note: Web Interface installation is disabled by default in v3.1-rc2.*
+5.  *Note: Web Interface installation is disabled by default in v3.1.*
 
 ## Python Toolset (Local)
 In addition to the optional web dashboard, the project provides a suite of Python scripts for direct host management:

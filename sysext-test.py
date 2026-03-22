@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator Test Suite v3.1-rc2
+# Sysext-Creator Test Suite v3.1
 # Environment: Host System (User)
 
 import os

@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext Doctor v3.1-rc2 - Precision Diagnostic
+# Sysext Doctor v3.1 - Precision Diagnostic
 # Checks for /etc Overwrites & RPM Conflicts
 
 import os

@@ -135,7 +135,7 @@ export default function App() {
             <Terminal size={32} />
             Sysext Manager
           </h1>
-          <p className="col-header mt-2">System Extension Creator & Manager v3.1-rc2</p>
+          <p className="col-header mt-2">System Extension Creator & Manager v3.1</p>
         </div>
         <div className="text-right">
           <p className="text-xs font-mono uppercase opacity-50">Host: fedora-workstation</p>
