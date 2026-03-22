@@ -12,16 +12,19 @@ Moderní grafické rozhraní pro správu systémových rozšíření (systemd-sy
 - **Frontend**: React, Tailwind CSS, Lucide Icons, Motion.
 - **Backend**: Express.js (slouží jako API bridge k Varlink socketu).
 
-## Jak spustit lokálně
-1. Nainstalujte závislosti:
-   ```bash
-   npm install
-   ```
-2. Spusťte vývojový server:
-   ```bash
-   npm run dev
-   ```
-3. Aplikace bude dostupná na `http://localhost:3000`.
+## Python Nástroje (Lokální)
+Kromě webového rozhraní projekt obsahuje sadu Python skriptů pro přímou správu na hostitelském systému:
 
-## Propojení s démonem
-Tento projekt je připraven pro komunikaci s `sysext-creator-daemon` přes Varlink protokol. V souboru `server.ts` je připraveno API, které stačí propojit se skutečným unix socketem `/run/sysext-creator/sysext-creator.sock`.
+- **`sysext-gui.py`**: Hlavní grafické rozhraní (PyQt6) s taby pro správu, tvorbu, vyhledávání a diagnostiku.
+- **`sysext-daemon.py`**: Varlink démon, který běží na pozadí a provádí operace s právy roota.
+- **`sysext-builder.py`**: Skript běžící uvnitř toolboxu, který vytváří `.raw` obrazy z RPM balíčků.
+- **`sysext-cli.py`**: Příkazová řádka pro rychlou instalaci a správu rozšíření.
+- **`sysext-doctor.py`**: Diagnostický nástroj pro kontrolu kolizí v `/etc` a RPM databázi.
+- **`sysext-updater.py`**: Automatický updater, který hlídá nové verze balíčků v repozitářích.
+- **`sysext-test.py`**: Testovací sada pro ověření funkčnosti celého řetězce.
+
+## Jak spustit lokální GUI
+```bash
+# Ujistěte se, že máte nainstalované PyQt6 a varlink
+python3 sysext-gui.py
+```
