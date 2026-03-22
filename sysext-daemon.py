@@ -77,12 +77,46 @@ class SysextCreatorLogic:
 
     def RemoveSysext(self, name):
         if not self.NAME_PATTERN.match(name): return {}
+        
+        # 1. Cleanup /etc symlinks before removing the image
+        self._CleanupEtc(name)
+        
+        # 2. Remove the actual image files
         for directory in [EXT_DIR, CONFEXT_DIR]:
             for suffix in [".raw", ".confext.raw"]:
                 target = os.path.join(directory, f"{name}{suffix}")
                 if os.path.exists(target): os.remove(target)
+        
+        # 3. Refresh system state
         self.RefreshExtensions()
         return {}
+
+    def _CleanupEtc(self, name):
+        """Parses tmpfiles.d config and removes symlinks in /etc created by this sysext."""
+        conf_path = f"/usr/lib/tmpfiles.d/sysext-creator-{name}.conf"
+        if not os.path.exists(conf_path):
+            logging.info(f"No tmpfiles.d config found for {name} at {conf_path}")
+            return
+
+        logging.info(f"Cleaning up /etc for {name} using {conf_path}...")
+        try:
+            with open(conf_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"): continue
+                    
+                    # Format: L+ /etc/path - - - - /usr/lib/...
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[0] in ["L", "L+"]:
+                        target_etc = parts[1]
+                        if target_etc.startswith("/etc/"):
+                            if os.path.islink(target_etc):
+                                logging.info(f"Removing symlink: {target_etc}")
+                                os.remove(target_etc)
+                            elif os.path.exists(target_etc):
+                                logging.warning(f"Path {target_etc} exists but is not a symlink, skipping.")
+        except Exception as e:
+            logging.error(f"Error during /etc cleanup for {name}: {e}")
 
     def DeploySysext(self, name, path, force):
         resolved_path = os.path.realpath(path)
