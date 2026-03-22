@@ -63,6 +63,12 @@ def calculate_host_dependencies(packages):
                     name_pkg, arch = match.group(1), match.group(6)
                     formatted = f"{name_pkg}.{arch}"
                     if formatted not in added_pkgs: added_pkgs.append(formatted)
+        
+        if added_pkgs:
+            logging.info(f"Found {len(added_pkgs)} packages to download (including dependencies).")
+        else:
+            logging.info("No additional dependencies needed.")
+            
         return added_pkgs
     except: return packages
 
@@ -128,6 +134,62 @@ def check_container_dependencies():
     else:
         logging.info("✅ All container dependencies are present.")
 
+def prune_shadowed_files(staging_root):
+    """
+    Remove files from staging that are owned by host RPM packages.
+    This prevents shadowing core system files while allowing updates 
+    of files provided by currently active sysexts (which are not in RPM DB).
+    """
+    logging.info("Fetching list of all files owned by host RPMs (this may take a moment)...")
+    try:
+        # Get all files owned by all installed packages on the host
+        res = subprocess.run(["flatpak-spawn", "--host", "rpm", "-ql", "--all"], 
+                             capture_output=True, text=True, errors="replace")
+        if res.returncode != 0:
+            logging.warning("Failed to get host RPM file list. Skipping smart pruning.")
+            return
+        
+        # Create a set of host-owned files for O(1) lookup
+        host_owned_files = set(res.stdout.splitlines())
+        logging.info(f"Indexed {len(host_owned_files)} system-owned files.")
+    except Exception as e:
+        logging.warning(f"Error during host RPM indexing: {e}. Skipping smart pruning.")
+        return
+
+    pruned_count = 0
+    usr_staging = os.path.join(staging_root, "usr")
+    if not os.path.exists(usr_staging):
+        return
+
+    for root, dirs, files in os.walk(usr_staging):
+        for f in files:
+            full_path = os.path.join(root, f)
+            rel_path = os.path.relpath(full_path, staging_root)
+            # Ensure path starts with / for matching
+            abs_rel_path = "/" + rel_path
+            
+            # CRITICAL: Only prune if the file is explicitly owned by a host RPM
+            if abs_rel_path in host_owned_files:
+                try:
+                    os.remove(full_path)
+                    pruned_count += 1
+                    logging.debug(f"Pruned shadowed system file: {abs_rel_path}")
+                except Exception as e:
+                    logging.warning(f"Failed to prune {abs_rel_path}: {e}")
+    
+    if pruned_count > 0:
+        logging.info(f"✅ Smart Pruning: Removed {pruned_count} files owned by the host OS.")
+        # Cleanup empty directories
+        for root, dirs, files in os.walk(usr_staging, topdown=False):
+            for d in dirs:
+                dir_path = os.path.join(root, d)
+                if not os.listdir(dir_path):
+                    try:
+                        os.rmdir(dir_path)
+                    except: pass
+    else:
+        logging.info("✅ No host OS shadowing detected.")
+
 def main():
     if len(sys.argv) < 3: sys.exit(1)
     name = sys.argv[1]
@@ -153,6 +215,7 @@ def main():
         os.makedirs(dnf_dir, exist_ok=True)
 
         if missing_deps:
+            logging.info(f"Downloading {len(missing_deps)} packages to {dnf_dir}...")
             run_cmd(["dnf", "--refresh", "download", "-y", f"--destdir={dnf_dir}"] + missing_deps)
             # Verify GPG signatures of downloaded packages
             downloaded_rpms = [os.path.join(dnf_dir, f) for f in os.listdir(dnf_dir) if f.endswith(".rpm")]
@@ -174,6 +237,9 @@ def main():
             ps = subprocess.Popen(["rpm2cpio", rpm], stdout=subprocess.PIPE)
             subprocess.run(["cpio", "-idmv"], stdin=ps.stdout, cwd=staging_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ps.wait()
+
+        # --- NEW: SMART PRUNING ---
+        prune_shadowed_files(staging_root)
 
         # --- NEW: /ETC PROCESSING ---
         etc_src = os.path.join(staging_root, "etc")

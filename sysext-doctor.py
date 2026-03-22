@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+SYSEXT_DIR = "/var/lib/extensions"
 CONFEXT_DIR = "/var/lib/confexts"
 
 def get_rpm_owner(file_path):
@@ -17,18 +18,21 @@ def get_rpm_owner(file_path):
     return None, True
 
 def check_collisions():
-    print("--- Checking for /etc Overwrites & RPM Conflicts ---")
-    confext_files = list(Path(CONFEXT_DIR).glob("*.raw"))
-    if not confext_files:
-        print("No configuration extensions found.")
+    print("--- Checking for /usr & /etc Overwrites & RPM Conflicts ---")
+    
+    # Check both sysexts and confexts
+    images = list(Path(SYSEXT_DIR).glob("*.raw")) + list(Path(CONFEXT_DIR).glob("*.raw"))
+    if not images:
+        print("No extensions found in /var/lib/extensions or /var/lib/confexts.")
         return
 
-    for img in confext_files:
+    for img in images:
         print(f"\n🔍 Analyzing {img.name}...")
         try:
             res = subprocess.run(["systemd-dissect", "--list", str(img)], capture_output=True, text=True, check=True)
             for line in res.stdout.splitlines():
-                if line.startswith("etc/") and not line.endswith("/"):
+                # Check for files in usr/ or etc/
+                if (line.startswith("usr/") or line.startswith("etc/")) and not line.endswith("/"):
                     full_path = "/" + line
                     owner, exists = get_rpm_owner(full_path)
                     if owner:
