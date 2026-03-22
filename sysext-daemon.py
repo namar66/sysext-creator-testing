@@ -26,14 +26,23 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 INTERFACE_NAME = "io.sysext.creator"
 INTERFACE_DEFINITION = """interface io.sysext.creator
 type Extension (name: string, version: string, packages: string)
+type Package (name: string, summary: string)
+type Update (name: string, current_version: string, new_version: string)
+type Check (name: string, status: string, message: string)
+
 method ListExtensions() -> (extensions: []Extension)
 method RemoveSysext(name: string) -> ()
 method DeploySysext(name: string, path: string, force: bool) -> (status: string, conflicts: []string, progress: int)
 method RefreshExtensions() -> (status: string)
+method SearchPackages(query: string) -> (packages: []Package)
+method CheckUpdates() -> (updates: []Update)
+method UpdateAll() -> ()
+method GetDoctorStatus() -> (checks: []Check)
 """
 
 class SysextCreatorLogic:
     NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+    CONTAINER_NAME = "sysext-builder"
 
     def ListExtensions(self):
         extensions = []
@@ -120,6 +129,64 @@ class SysextCreatorLogic:
 
         return "Success"
 
+    def SearchPackages(self, query):
+        packages = []
+        try:
+            cmd = ["toolbox", "run", "-c", self.CONTAINER_NAME, "dnf", "search", "-y", query]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    if " : " in line:
+                        name, summary = line.split(" : ", 1)
+                        packages.append({"name": name.strip(), "summary": summary.strip()})
+        except: pass
+        return {"packages": packages}
+
+    def CheckUpdates(self):
+        updates = []
+        exts = self.ListExtensions().get("extensions", [])
+        for e in exts:
+            name = e['name']
+            current_version = e['version']
+            packages = e['packages'].split()
+            if not packages or packages[0] == "N/A": continue
+            
+            main_pkg = packages[0]
+            try:
+                cmd = ["toolbox", "run", "-c", self.CONTAINER_NAME, "dnf", "repoquery", "-y", "--latest-limit", "1", "--qf", "%{version}-%{release}", main_pkg]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+                if res.returncode == 0 and res.stdout.strip():
+                    new_version = res.stdout.strip().splitlines()[-1].strip()
+                    if new_version != current_version:
+                        updates.append({"name": name, "current_version": current_version, "new_version": new_version})
+            except: pass
+        return {"updates": updates}
+
+    def UpdateAll(self):
+        # Simply call the updater script
+        updater_script = "/usr/local/bin/sysext-updater.py"
+        if os.path.exists(updater_script):
+            subprocess.Popen(["python3", updater_script])
+        return {}
+
+    def GetDoctorStatus(self):
+        checks = []
+        # Check Varlink socket
+        checks.append({"name": "Varlink Socket", "status": "ok" if os.path.exists(SOCKET_PATH) else "error", "message": "Socket exists" if os.path.exists(SOCKET_PATH) else "Socket missing"})
+        
+        # Check systemd-sysext
+        sysext_tool = shutil.which("systemd-sysext")
+        checks.append({"name": "systemd-sysext", "status": "ok" if sysext_tool else "error", "message": "Tool found" if sysext_tool else "Tool missing"})
+        
+        # Check toolbox container
+        try:
+            res = subprocess.run(["podman", "container", "exists", self.CONTAINER_NAME])
+            checks.append({"name": "Toolbox Container", "status": "ok" if res.returncode == 0 else "error", "message": "Container exists" if res.returncode == 0 else "Container missing"})
+        except:
+            checks.append({"name": "Toolbox Container", "status": "error", "message": "Podman check failed"})
+            
+        return {"checks": checks}
+
 logic = SysextCreatorLogic()
 
 class VarlinkNativeHandler(socketserver.StreamRequestHandler):
@@ -147,6 +214,14 @@ class VarlinkNativeHandler(socketserver.StreamRequestHandler):
                         resp = {"parameters": logic.DeploySysext(**params)}
                     elif method == f"{INTERFACE_NAME}.RefreshExtensions":
                         resp = {"parameters": {"status": logic.RefreshExtensions()}}
+                    elif method == f"{INTERFACE_NAME}.SearchPackages":
+                        resp = {"parameters": logic.SearchPackages(**params)}
+                    elif method == f"{INTERFACE_NAME}.CheckUpdates":
+                        resp = {"parameters": logic.CheckUpdates()}
+                    elif method == f"{INTERFACE_NAME}.UpdateAll":
+                        resp = {"parameters": logic.UpdateAll()}
+                    elif method == f"{INTERFACE_NAME}.GetDoctorStatus":
+                        resp = {"parameters": logic.GetDoctorStatus()}
                     else:
                         resp = {"error": "org.varlink.service.MethodNotFound"}
                     self.request.sendall(json.dumps(resp).encode('utf-8') + b'\0')
