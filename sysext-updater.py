@@ -63,7 +63,7 @@ def connect():
     return NativeVarlinkClient(SOCKET_PATH)
 
 def get_remote_version(pkg_name):
-    """Zjistí dostupnou verzi v repozitáři přes toolbox."""
+    """Determine available version in the repository via toolbox."""
     try:
         cmd = ["toolbox", "run", "-c", CONTAINER_NAME, "dnf", "--refresh", "repoquery", "-y", "--latest-limit", "1", "--qf", "%{version}-%{release}", pkg_name]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -88,7 +88,7 @@ def update_extensions():
             logging.info("No extensions found to update.")
             return
 
-        # Ujistíme se, že builder kontejner existuje
+        # Ensure the builder container exists
         if subprocess.run(["podman", "container", "exists", CONTAINER_NAME]).returncode != 0:
             logging.info(f"Creating toolbox container '{CONTAINER_NAME}'...")
             subprocess.run(["toolbox", "create", "-y", "-c", CONTAINER_NAME], check=True)
@@ -105,9 +105,9 @@ def update_extensions():
                 continue
 
             packages = packages_str.split()
-            main_pkg = packages[0] # Předpokládáme, že první balíček je ten hlavní
+            main_pkg = packages[0] # We assume the first package is the main one
 
-            # Pokud je to lokální RPM, updater ho neumí "aktualizovat" (nemá odkud vzít nové)
+            # If it's a local RPM, the updater cannot "update" it (nowhere to get a new one from)
             if main_pkg.endswith(".rpm"):
                 logging.info(f"Skipping '{name}': Local RPM based extension.")
                 continue
@@ -128,7 +128,7 @@ def update_extensions():
             try:
                 subprocess.run(["toolbox"] + build_args, check=True)
 
-                # Nasazení po úspěšném buildu
+                # Deployment after a successful build
                 path = BUILD_DIR / f"{name}.raw"
                 if path.exists():
                     remote.call("DeploySysext", name=name, path=str(path), force=True)

@@ -5,13 +5,13 @@
 
 set -e
 
-# --- KONFIGURACE ---
+# --- CONFIGURATION ---
 INSTALL_DIR="/usr/local/bin"
 SERVICE_DIR="/etc/systemd/system"
 DROP_ZONE="/var/tmp/sysext-creator"
 SOCKET_DIR="/run/sysext-creator"
 
-# --- CESTY K SOUBORŮM (Z aktuálního adresáře) ---
+# --- FILE PATHS (From current directory) ---
 DAEMON_SRC="sysext-daemon.py"
 BUILDER_SRC="sysext-builder.py"
 CLI_SRC="sysext-cli.py"
@@ -19,7 +19,7 @@ UPDATER_SRC="sysext-updater.py"
 DOCTOR_SRC="sysext-doctor.py"
 GUI_SRC="sysext-gui.py"
 
-# --- KONTROLA SOUBORŮ ---
+# --- FILE CHECK ---
 for f in "$DAEMON_SRC" "$BUILDER_SRC" "$CLI_SRC" "$UPDATER_SRC" "$DOCTOR_SRC" "$GUI_SRC"; do
     if [ ! -f "$f" ]; then
         echo "Error: Missing $f in current directory."
@@ -41,12 +41,12 @@ sudo chmod +x "$INSTALL_DIR"/sysext-updater.py
 sudo chmod +x "$INSTALL_DIR"/sysext-doctor.py
 sudo chmod +x "$INSTALL_DIR"/sysext-gui.py
 
-# Symlink pro CLI
+# Symlink for CLI
 sudo ln -sf "$INSTALL_DIR/sysext-creator-cli.py" "$INSTALL_DIR/sysext-cli"
 
 echo ">>> Phase 2: Setting up Drop-Zone (Sticky Bit)"
-# DROP-ZONE: Místo, kam uživatel (toolbox) zapisuje .raw obrazy
-# Sticky bit (1777) zajistí, že uživatelé si nemohou mazat soubory navzájem
+# DROP-ZONE: Place where user (toolbox) writes .raw images
+# Sticky bit (1777) ensures users cannot delete each other's files
 sudo mkdir -p "$DROP_ZONE"
 sudo chmod 1777 "$DROP_ZONE"
 
@@ -63,18 +63,18 @@ Restart=always
 User=root
 Group=wheel
 
-# --- BEZPEČNOSTNÍ NASTAVENÍ ---
+# --- SECURITY SETTINGS ---
 RuntimeDirectory=sysext-creator
 RuntimeDirectoryMode=0770
 
-# Sdílení mount namespace s hostitelem (nutné pro systemd-sysext refresh)
+# Share mount namespace with host (required for systemd-sysext refresh)
 MountFlags=shared
 
-# Oprávnění pro mount operace
+# Permissions for mount operations
 CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 AmbientCapabilities=CAP_SYS_ADMIN CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE
 
-# Vypnutí izolace, která by mohla bránit v přístupu k /usr
+# Disable isolation that could prevent access to /usr
 ProtectSystem=no
 ProtectHome=no
 
@@ -87,7 +87,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now sysext-creator.service
 
 echo ">>> Phase 5: Initializing Toolbox Container"
-# Vytvoříme kontejner dopředu, aby GUI nemuselo čekat
+# Create container in advance so GUI doesn't have to wait
 if ! podman container exists sysext-builder; then
     echo "Creating 'sysext-builder' toolbox container..."
     toolbox create -y -c sysext-builder
@@ -128,7 +128,7 @@ EOF
 fi
 
 echo ">>> Phase 07: Checking System Dependencies (Node.js, PyQt6)"
-# Kontrola a instalace npm (Node.js) a PyQt6 pro GUI
+# Check and install npm (Node.js) and PyQt6 for GUI
 if ! command -v npm &> /dev/null; then
     echo "npm not found. Installing nodejs..."
     if command -v sysext-cli &> /dev/null; then

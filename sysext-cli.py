@@ -64,17 +64,17 @@ def connect():
     return NativeVarlinkClient(SOCKET_ADDRESS)
 
 def get_package_version(pkg_name_or_path):
-    """Zjistí verzi balíčku z RPM nebo z repozitáře (v toolboxu)."""
+    """Determine package version from RPM or repository (in toolbox)."""
     if pkg_name_or_path.endswith(".rpm") and os.path.exists(pkg_name_or_path):
         res = subprocess.run(["rpm", "-qp", "--qf", "%{VERSION}-%{RELEASE}", pkg_name_or_path], capture_output=True, text=True)
         return res.stdout.strip() if res.returncode == 0 else None
     else:
-        # Repoquery je mnohem spolehlivější pro skriptování než 'dnf info'
+        # Repoquery is much more reliable for scripting than 'dnf info'
         try:
             cmd = ["toolbox", "run", "-c", CONTAINER_NAME, "dnf", "repoquery", "-y", "--latest-limit", "1", "--qf", "%{version}-%{release}", pkg_name_or_path]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if res.returncode == 0 and res.stdout.strip():
-                # Vezmeme poslední řádek (pro případ, že jich repoquery vrátí víc)
+                # Take the last line (in case repoquery returns multiple)
                 return res.stdout.strip().splitlines()[-1].strip()
         except: pass
     return None
@@ -111,7 +111,7 @@ def cmd_install(args):
         packages = args.packages if args.packages else [name]
         main_pkg = packages[0]
 
-    # --- KONTROLA VERZE ---
+    # --- VERSION CHECK ---
     print(f"Checking version for '{name}'...")
     with connect() as remote:
         res = remote.call("ListExtensions")
@@ -132,7 +132,7 @@ def cmd_install(args):
             else:
                 print(f"⚠️ Could not determine remote version. Proceeding with build to be safe...")
 
-    # --- BUILD PROCES ---
+    # --- BUILD PROCESS ---
     print(f"\n--- Step 1: Building '{name}' ---")
     script = "/run/host" + BUILDER_SCRIPT
     try:

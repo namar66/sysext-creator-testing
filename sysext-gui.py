@@ -21,7 +21,7 @@ BUILDER_SCRIPT = "/usr/local/bin/sysext-creator-builder.py"
 # --- WORKER THREADS ---
 
 class VarlinkWorker(QThread):
-    """Obecný worker pro asynchronní Varlink volání"""
+    """General worker for asynchronous Varlink calls"""
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
