@@ -20,20 +20,28 @@ def get_rpm_owner(file_path):
 def check_collisions():
     print("--- Checking for /usr & /etc Overwrites & RPM Conflicts ---")
     
-    # Check both sysexts and confexts
     images = list(Path(SYSEXT_DIR).glob("*.raw")) + list(Path(CONFEXT_DIR).glob("*.raw"))
     if not images:
         print("No extensions found in /var/lib/extensions or /var/lib/confexts.")
         return
+
+    # Global map of files across all extensions to detect cross-extension collisions
+    # Format: { "/usr/bin/foo": ["ext1.raw", "ext2.raw"] }
+    global_file_map = {}
 
     for img in images:
         print(f"\n🔍 Analyzing {img.name}...")
         try:
             res = subprocess.run(["systemd-dissect", "--list", str(img)], capture_output=True, text=True, check=True)
             for line in res.stdout.splitlines():
-                # Check for files in usr/ or etc/
                 if (line.startswith("usr/") or line.startswith("etc/")) and not line.endswith("/"):
                     full_path = "/" + line
+                    
+                    # Track for cross-extension collision
+                    if full_path not in global_file_map:
+                        global_file_map[full_path] = []
+                    global_file_map[full_path].append(img.name)
+
                     owner, exists = get_rpm_owner(full_path)
                     if owner:
                         print(f"[FAIL] {full_path} overwrites system package: {owner}")
@@ -42,6 +50,14 @@ def check_collisions():
                     else:
                         print(f"[ OK ] {full_path} (new file)")
         except Exception as e: print(f"Error: {e}")
+
+    print("\n--- Checking for Cross-Extension Collisions ---")
+    cross_collisions = {k: v for k, v in global_file_map.items() if len(v) > 1}
+    if cross_collisions:
+        for path, exts in cross_collisions.items():
+            print(f"[FAIL] Collision: {path} is provided by multiple extensions: {', '.join(exts)}")
+    else:
+        print("[ OK ] No cross-extension collisions detected.")
 
 if __name__ == "__main__":
     if os.geteuid() != 0:

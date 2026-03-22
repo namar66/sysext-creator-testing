@@ -4,8 +4,9 @@
 # Fixes: Automatic /etc migration via tmpfiles.d
 
 import os
-import sys
 import subprocess
+import sys
+import tempfile
 import shutil
 import logging
 import re
@@ -79,7 +80,6 @@ def sync_host_repos():
     host_gpg = "/run/host/etc/pki/rpm-gpg"
     
     if os.path.exists(host_repos):
-        # Use sudo cp to be able to overwrite files in /etc
         try:
             subprocess.run(f"sudo cp -f {host_repos}/*.repo /etc/yum.repos.d/", shell=True)
         except: pass
@@ -90,21 +90,32 @@ def sync_host_repos():
             subprocess.run(f"sudo cp -rf {host_gpg}/* /etc/pki/rpm-gpg/", shell=True)
             # Import keys into the toolbox RPM database
             for f in os.listdir(host_gpg):
-                subprocess.run(["sudo", "rpm", "--import", os.path.join("/etc/pki/rpm-gpg", f)], capture_output=True)
+                key_path = os.path.join("/etc/pki/rpm-gpg", f)
+                if os.path.isfile(key_path) and not f.startswith("."):
+                    subprocess.run(["sudo", "rpm", "--import", key_path], capture_output=True)
         except: pass
 
-def verify_rpms(rpm_paths):
-    """Verify GPG signatures of downloaded RPM packages."""
+def verify_rpms(rpm_paths, is_local=False):
+    """Verify GPG signatures of RPM packages. Local packages are checked but don't fail the build if unsigned."""
     if not rpm_paths: return
-    logging.info(f"Verifying GPG signatures for {len(rpm_paths)} packages...")
+    
+    label = "local" if is_local else "downloaded"
+    logging.info(f"Verifying GPG signatures for {len(rpm_paths)} {label} packages...")
+    
     for rpm in rpm_paths:
         try:
             # rpm -K (or --checksig) verifies the signature
             subprocess.run(["rpm", "-K", rpm], check=True, capture_output=True)
-        except subprocess.CalledProcessError:
-            logging.error(f"❌ GPG Verification FAILED for: {rpm}")
-            sys.exit(1)
-    logging.info("✅ All signatures verified.")
+        except subprocess.CalledProcessError as e:
+            if is_local:
+                logging.warning(f"⚠️ Local package signature verification skipped/failed: {os.path.basename(rpm)}")
+            else:
+                logging.error(f"❌ GPG Verification FAILED for repo package: {os.path.basename(rpm)}")
+                logging.error(f"Details: {e.stderr}")
+                sys.exit(1)
+    
+    if not is_local:
+        logging.info("✅ All repository signatures verified.")
 
 def check_container_dependencies():
     """Ensure erofs-utils and dnf-plugins-core are installed in the toolbox."""
@@ -199,16 +210,18 @@ def main():
     sync_host_repos()
 
     output_dir = "/run/host/var/tmp/sysext-creator"
-    build_dir = f"/var/tmp/sysext-build-{name}"
+    build_dir = tempfile.mkdtemp(prefix=f"sysext-build-{name}-")
     staging_root = build_dir
 
     try:
-        if os.path.exists(build_dir): shutil.rmtree(build_dir)
         os.makedirs(staging_root, exist_ok=True)
 
         local_rpms = [p for p in requested_packages if p.endswith(".rpm") and os.path.isfile(p)]
         repo_packages = [p for p in requested_packages if p not in local_rpms]
         all_pkgs = repo_packages + local_rpms
+
+        if local_rpms:
+            verify_rpms(local_rpms, is_local=True)
 
         missing_deps = calculate_host_dependencies(all_pkgs)
         dnf_dir = os.path.join(build_dir, "dnf-downloads")
@@ -219,7 +232,7 @@ def main():
             run_cmd(["dnf", "--refresh", "download", "-y", f"--destdir={dnf_dir}"] + missing_deps)
             # Verify GPG signatures of downloaded packages
             downloaded_rpms = [os.path.join(dnf_dir, f) for f in os.listdir(dnf_dir) if f.endswith(".rpm")]
-            verify_rpms(downloaded_rpms)
+            verify_rpms(downloaded_rpms, is_local=False)
 
         rpms_to_extract = local_rpms + [os.path.join(dnf_dir, f) for f in os.listdir(dnf_dir) if f.endswith(".rpm")]
 
@@ -293,13 +306,19 @@ def main():
         with open(os.path.join(meta_dir, "version.txt"), "w") as f:
             f.write(version)
 
+        # Atomic write: build to .tmp first
         out_file = os.path.join(output_dir, f"{name}.raw")
+        tmp_out_file = out_file + ".tmp"
+        
         selinux_contexts = "/run/host/etc/selinux/targeted/contexts/files/file_contexts"
         cmd = ["mkfs.erofs", "-x1", "--all-root", "-U", "clear", "-T", "0"]
         if os.path.exists(selinux_contexts):
             cmd.append(f"--file-contexts={selinux_contexts}")
-        cmd.extend([out_file, staging_root])
+        cmd.extend([tmp_out_file, staging_root])
         run_cmd(cmd)
+        
+        # Atomic rename
+        os.rename(tmp_out_file, out_file)
         logging.info(f"Build finished: {out_file}")
 
     finally:

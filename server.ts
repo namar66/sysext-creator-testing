@@ -3,40 +3,83 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import net from 'net';
+import fs from 'fs';
 
 const execAsync = promisify(exec);
 const app = express();
 const PORT = 3000;
+const SOCKET_PATH = '/run/sysext-creator.sock';
 
 app.use(express.json());
 
+// --- SECURE DAEMON COMMUNICATION ---
+
+function callDaemon(method: string, params: any = {}): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(SOCKET_PATH);
+    let responseData = '';
+
+    client.on('connect', () => {
+      client.write(JSON.stringify({ method, params }));
+    });
+
+    client.on('data', (data) => {
+      responseData += data.toString();
+    });
+
+    client.on('end', () => {
+      try {
+        resolve(JSON.parse(responseData));
+      } catch (e) {
+        reject(new Error('Invalid response from daemon'));
+      }
+    });
+
+    client.on('error', (err) => {
+      reject(err);
+    });
+  });
+}
+
+// Helper to validate inputs (alphanumeric + some safe chars)
+function isValidInput(input: string): boolean {
+  return /^[a-zA-Z0-9._+-]+$/.test(input);
+}
+
 // --- API ROUTES ---
 
-// Mock data for now, in "ostry release" these will call real system commands
-app.get('/api/extensions', (req, res) => {
-  res.json([
-    { name: 'mc', version: '4.8.31-1.fc43', packages: 'mc, slang, gpm-libs' },
-    { name: 'htop', version: '3.3.0-4.fc43', packages: 'htop' },
-    { name: 'fastfetch', version: '2.34.0-1.fc43', packages: 'fastfetch, yyjson' }
-  ]);
+app.get('/api/extensions', async (req, res) => {
+  try {
+    // List installed extensions by checking /var/lib/extensions/
+    const { stdout } = await execAsync('ls /var/lib/extensions/*.raw');
+    const files = stdout.split('\n').filter(f => f.trim() !== '');
+    
+    const extensions = files.map(f => {
+      const name = path.basename(f, '.raw');
+      return { 
+        name, 
+        version: 'active',
+        packages: 'installed' 
+      };
+    });
+    res.json(extensions);
+  } catch (e) {
+    res.json([]);
+  }
 });
 
 app.get('/api/updates', (req, res) => {
-  res.json([
-    { name: 'mc', current: '4.8.31-1.fc43', latest: '4.8.31-2.fc43' }
-  ]);
+  res.json([]); 
 });
 
 app.get('/api/doctor', async (req, res) => {
   try {
-    // Real call to sysext-doctor.py
-    const { stdout } = await execAsync('sudo python3 /sysext-doctor.py');
-    
-    // Parse doctor output (simplified for now)
-    const lines = stdout.split('\n');
+    const result = await callDaemon('doctor');
+    const lines = result.output.split('\n');
     const checks = lines
-      .filter(l => l.includes('[ OK ]') || l.includes('[FAIL]') || l.includes('[WARN]'))
-      .map(l => {
+      .filter((l: string) => l.includes('[ OK ]') || l.includes('[FAIL]') || l.includes('[WARN]'))
+      .map((l: string) => {
         const status = l.includes('[ OK ]') ? 'ok' : 'error';
         const message = l.split('] ')[1];
         const name = message.split(' ')[0];
@@ -44,7 +87,7 @@ app.get('/api/doctor', async (req, res) => {
       });
 
     res.json({
-      status: checks.some(c => c.status === 'error') ? 'unhealthy' : 'healthy',
+      status: checks.some((c: any) => c.status === 'error') ? 'unhealthy' : 'healthy',
       checks: checks.length > 0 ? checks : [
         { name: 'System', status: 'ok', message: 'No critical collisions detected.' }
       ]
@@ -52,7 +95,7 @@ app.get('/api/doctor', async (req, res) => {
   } catch (e) {
     res.json({
       status: 'error',
-      checks: [{ name: 'Doctor', status: 'error', message: 'Failed to run sysext-doctor.py' }]
+      checks: [{ name: 'Doctor', status: 'error', message: 'Failed to communicate with daemon' }]
     });
   }
 });
@@ -61,25 +104,49 @@ app.post('/api/refresh-updates', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.post('/api/update-all', (req, res) => {
-  res.json({ status: 'ok' });
+app.post('/api/update-all', async (req, res) => {
+  res.json({ status: 'queued' });
 });
 
-app.get('/api/search', (req, res) => {
+app.get('/api/search', async (req, res) => {
   const q = req.query.q as string;
-  res.json([
-    { name: q || 'example-pkg', description: 'A sample package from Fedora repositories' },
-    { name: 'vim-enhanced', description: 'A version of the VIM editor which includes recent enhancements' }
-  ]);
+  if (!q || !isValidInput(q)) return res.json([]);
+  
+  try {
+    const result = await callDaemon('search', { q });
+    res.json(result.results || []);
+  } catch (e) {
+    res.json([]);
+  }
 });
 
-app.post('/api/remove', (req, res) => {
-  res.json({ status: 'ok' });
+app.post('/api/remove', async (req, res) => {
+  const { name } = req.body;
+  if (!name || !isValidInput(name)) {
+    return res.status(400).json({ error: 'Invalid name' });
+  }
+
+  try {
+    const result = await callDaemon('remove', { name });
+    if (result.status === 'ok') {
+      res.json({ status: 'ok' });
+    } else {
+      res.status(500).json({ error: result.message });
+    }
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to communicate with daemon' });
+  }
 });
 
 // --- VITE MIDDLEWARE ---
 
 async function startServer() {
+  // Ensure daemon is running (in a real system, this is handled by systemd)
+  if (!fs.existsSync(SOCKET_PATH)) {
+    console.log('Starting sysext-daemon...');
+    exec('sudo python3 /sysext-daemon.py &');
+  }
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
