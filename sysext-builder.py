@@ -100,11 +100,40 @@ def verify_rpms(rpm_paths):
             sys.exit(1)
     logging.info("✅ All signatures verified.")
 
+def check_container_dependencies():
+    """Ensure erofs-utils and dnf-plugins-core are installed in the toolbox."""
+    logging.info("Checking container dependencies...")
+    
+    missing = []
+    # Check mkfs.erofs (erofs-utils)
+    if shutil.which("mkfs.erofs") is None:
+        missing.append("erofs-utils")
+    
+    # Check dnf download (dnf-plugins-core)
+    try:
+        subprocess.run(["dnf", "download", "--help"], capture_output=True, check=True)
+    except:
+        missing.append("dnf-plugins-core")
+
+    if missing:
+        logging.warning(f"Missing dependencies in container: {', '.join(missing)}")
+        logging.info("Attempting to install missing dependencies...")
+        try:
+            # Use sudo because toolbox usually requires it for dnf install
+            subprocess.run(["sudo", "dnf", "install", "-y"] + missing, check=True)
+            logging.info("✅ Dependencies installed successfully.")
+        except Exception as e:
+            logging.error(f"❌ Failed to install dependencies: {e}")
+            sys.exit(1)
+    else:
+        logging.info("✅ All container dependencies are present.")
+
 def main():
     if len(sys.argv) < 3: sys.exit(1)
     name = sys.argv[1]
     requested_packages = sys.argv[2:]
 
+    check_container_dependencies()
     sync_host_repos()
 
     output_dir = "/run/host/var/tmp/sysext-creator"

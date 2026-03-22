@@ -5,38 +5,60 @@
 
 import sys
 import os
-import varlink
+import socket
 import json
+import shutil
+import subprocess
+import re
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel,
                              QPushButton, QMessageBox, QHBoxLayout,
                              QLineEdit, QProgressBar, QTabWidget, QPlainTextEdit,
                              QHeaderView, QTableWidget, QTableWidgetItem, QListWidget)
 from PyQt6.QtCore import QThread, pyqtSignal, QProcess, Qt
 
-SOCKET_PATH = "unix:/run/sysext-creator/sysext-creator.sock"
+SOCKET_PATH = "/run/sysext-creator/sysext-creator.sock"
 INTERFACE = "io.sysext.creator"
 CONTAINER_NAME = "sysext-builder"
 BUILDER_SCRIPT = "/usr/local/bin/sysext-creator-builder.py"
 
 # --- WORKER THREADS ---
 
-class VarlinkWorker(QThread):
-    """General worker for asynchronous Varlink calls"""
+class DaemonWorker(QThread):
+    """General worker for asynchronous daemon calls via Unix socket"""
     finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
-    def __init__(self, method_name, *args):
+    def __init__(self, method_name, **params):
         super().__init__()
         self.method_name = method_name
-        self.args = args
+        self.params = params
 
     def run(self):
         try:
-            with varlink.Client(address=SOCKET_PATH) as client:
-                with client.open(INTERFACE) as remote:
-                    method = getattr(remote, self.method_name)
-                    reply = method(*self.args)
-                    self.finished.emit(reply)
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(SOCKET_PATH)
+            
+            req = {
+                "method": f"{INTERFACE}.{self.method_name}",
+                "parameters": self.params
+            }
+            sock.sendall(json.dumps(req).encode('utf-8') + b'\0')
+            
+            buffer = b""
+            while True:
+                chunk = sock.recv(8192)
+                if not chunk:
+                    break
+                buffer += chunk
+                if b'\0' in buffer:
+                    msg, _ = buffer.split(b'\0', 1)
+                    resp = json.loads(msg.decode('utf-8'))
+                    if "error" in resp:
+                        self.error.emit(resp["error"])
+                    else:
+                        self.finished.emit(resp.get("parameters", {}))
+                    break
+            sock.close()
         except Exception as e:
             self.error.emit(str(e))
 
@@ -46,9 +68,9 @@ class SysextManagerGUI(QWidget):
         self.workers = [] # List to keep workers alive
         self.init_ui()
 
-    def run_worker(self, method_name, *args, callback=None):
-        """Helper to run Varlink tasks safely in background"""
-        worker = VarlinkWorker(method_name, *args)
+    def run_worker(self, method_name, callback=None, **params):
+        """Helper to run daemon tasks safely in background"""
+        worker = DaemonWorker(method_name, **params)
         self.workers.append(worker) # Keep reference
         
         if callback:
@@ -56,7 +78,7 @@ class SysextManagerGUI(QWidget):
         
         # Cleanup worker from list when done
         worker.finished.connect(lambda: self.workers.remove(worker) if worker in self.workers else None)
-        worker.error.connect(lambda msg: (QMessageBox.warning(self, "Varlink Error", msg), 
+        worker.error.connect(lambda msg: (QMessageBox.warning(self, "Daemon Error", msg), 
                                          self.workers.remove(worker) if worker in self.workers else None))
         worker.start()
         return worker
@@ -90,7 +112,13 @@ class SysextManagerGUI(QWidget):
         # Build Process
         self.build_process = QProcess(self)
         self.build_process.readyReadStandardOutput.connect(self.read_build_output)
+        self.build_process.readyReadStandardError.connect(self.read_build_output)
         self.build_process.finished.connect(self.on_build_finished)
+
+        # Search Process
+        self.search_process = QProcess(self)
+        self.search_process.readyReadStandardOutput.connect(self.read_search_output)
+        self.search_process.finished.connect(self.on_search_finished)
 
         # Initial Load
         self.refresh_manager()
@@ -229,22 +257,63 @@ class SysextManagerGUI(QWidget):
         if row < 0: return
         name = self.table.item(row, 0).text()
         if QMessageBox.question(self, "Confirm", f"Remove {name}?") == QMessageBox.StandardButton.Yes:
-            self.run_worker("RemoveSysext", name, callback=lambda _: self.refresh_manager())
+            self.run_worker("RemoveSysext", callback=lambda _: self.refresh_manager(), name=name)
 
     # --- LOGIC: SEARCH ---
     def run_search(self):
         query = self.search_in.text().strip()
         if not query: return
         self.search_results.setRowCount(0)
-        self.run_worker("SearchPackages", query, callback=self.on_search_results)
+        self.search_in.setEnabled(False)
+        
+        toolbox_path = shutil.which("toolbox") or "toolbox"
+        self.search_process.start(toolbox_path, ["run", "-c", CONTAINER_NAME, "dnf", "search", "-y", query])
 
-    def on_search_results(self, res):
-        pkgs = res.get('packages', [])
-        for p in pkgs:
-            row = self.search_results.rowCount()
-            self.search_results.insertRow(row)
-            self.search_results.setItem(row, 0, QTableWidgetItem(p['name']))
-            self.search_results.setItem(row, 1, QTableWidgetItem(p['summary']))
+    def read_search_output(self):
+        # We'll parse the output in on_search_finished to avoid partial line issues
+        pass
+
+    def on_search_finished(self):
+        self.search_in.setEnabled(True)
+        out = self.search_process.readAllStandardOutput().data().decode(errors='replace')
+        err = self.search_process.readAllStandardError().data().decode(errors='replace')
+        
+        # Combine output and process line by line
+        lines = (out + err).splitlines()
+        count = 0
+        
+        self.search_results.setUpdatesEnabled(False)
+        self.search_results.setRowCount(0) # Clear previous results
+        
+        for line in lines:
+            clean_line = line.strip()
+            if not clean_line: continue
+            
+            # DNF search output: "package.arch  summary" or "package : summary"
+            if " : " in clean_line:
+                parts = clean_line.split(" : ", 1)
+            else:
+                parts = clean_line.split(None, 1)
+            
+            if len(parts) == 2:
+                name = parts[0].strip()
+                summary = parts[1].strip()
+                
+                # Filter out headers
+                if name.endswith(':') or any(h in name for h in ["Odpovídající", "Matched", "Aktualizace", "Repozitáře", "Loading", "Načítání", "Last", "Updating"]):
+                    continue
+                
+                # Basic validation
+                if " " not in name and len(name) < 100:
+                    row = self.search_results.rowCount()
+                    self.search_results.insertRow(row)
+                    self.search_results.setItem(row, 0, QTableWidgetItem(name))
+                    self.search_results.setItem(row, 1, QTableWidgetItem(summary))
+                    count += 1
+        
+        self.search_results.setUpdatesEnabled(True)
+        if count > 0:
+            print(f"Search: Found {count} packages")
 
     # --- LOGIC: UPDATER ---
     def check_updates(self):
@@ -283,28 +352,66 @@ class SysextManagerGUI(QWidget):
     # --- LOGIC: CREATOR ---
     def read_build_output(self):
         out = self.build_process.readAllStandardOutput().data().decode()
-        self.build_log.appendPlainText(out.strip())
+        err = self.build_process.readAllStandardError().data().decode()
+        if out:
+            self.build_log.insertPlainText(out)
+        if err:
+            self.build_log.insertPlainText(err)
+        
+        # Auto-scroll to bottom
+        cursor = self.build_log.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.build_log.setTextCursor(cursor)
 
     def start_build(self):
         name = self.name_in.text().strip()
         pkgs = self.pkgs_in.text().strip()
         if not name or not pkgs: return
+        
+        # --- CONTAINER CHECK ---
+        self.build_log.clear()
+        self.build_log.appendPlainText(f"Checking for container '{CONTAINER_NAME}'...")
+        
+        res = subprocess.run(["podman", "container", "exists", CONTAINER_NAME])
+        if res.returncode != 0:
+            self.build_log.appendPlainText(f"⚠️ Container '{CONTAINER_NAME}' not found.")
+            reply = QMessageBox.question(self, "Missing Container", 
+                                       f"The toolbox container '{CONTAINER_NAME}' is missing. Create it now?",
+                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.build_log.appendPlainText("Creating container... (this may take a while)")
+                self.progress_bar.setVisible(True)
+                self.progress_bar.setRange(0, 0)
+                QApplication.processEvents()
+                
+                try:
+                    subprocess.run(["toolbox", "create", "-y", "-c", CONTAINER_NAME], check=True)
+                    self.build_log.appendPlainText("✅ Container created successfully.")
+                except Exception as e:
+                    self.build_log.appendPlainText(f"❌ Failed to create container: {e}")
+                    QMessageBox.critical(self, "Error", f"Could not create container: {e}")
+                    self.progress_bar.setVisible(False)
+                    return
+            else:
+                self.build_log.appendPlainText("Build cancelled by user.")
+                return
+
         self.current_name = name
         self.build_btn.setEnabled(False)
-        self.build_log.clear()
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         
+        toolbox_path = shutil.which("toolbox") or "toolbox"
         script = "/run/host" + BUILDER_SCRIPT
-        self.build_process.start("toolbox", ["run", "-c", CONTAINER_NAME, "python3", script, name, *pkgs.split()])
+        self.build_process.start(toolbox_path, ["run", "-c", CONTAINER_NAME, "python3", script, name, *pkgs.split()])
 
     def on_build_finished(self):
         self.progress_bar.setVisible(False)
         self.build_btn.setEnabled(True)
         if self.build_process.exitCode() == 0:
             path = f"/var/tmp/sysext-creator/{self.current_name}.raw"
-            self.run_worker("DeploySysext", self.current_name, path, True, 
-                           callback=lambda _: (self.refresh_manager(), QMessageBox.information(self, "Done", "Sysext Deployed!")))
+            self.run_worker("DeploySysext", callback=lambda _: (self.refresh_manager(), QMessageBox.information(self, "Done", "Sysext Deployed!")),
+                           name=self.current_name, path=path, force=True)
         else:
             QMessageBox.critical(self, "Error", "Build failed. Check logs.")
 

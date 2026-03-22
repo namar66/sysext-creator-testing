@@ -178,12 +178,19 @@ class SysextCreatorLogic:
         sysext_tool = shutil.which("systemd-sysext")
         checks.append({"name": "systemd-sysext", "status": "ok" if sysext_tool else "error", "message": "Tool found" if sysext_tool else "Tool missing"})
         
-        # Check toolbox container
+        # Check toolbox image (more reliable for root than container check)
         try:
-            res = subprocess.run(["podman", "container", "exists", self.CONTAINER_NAME])
-            checks.append({"name": "Toolbox Container", "status": "ok" if res.returncode == 0 else "error", "message": "Container exists" if res.returncode == 0 else "Container missing"})
+            res = subprocess.run(["podman", "image", "exists", "registry.fedoraproject.org/fedora-toolbox"], capture_output=True)
+            if res.returncode != 0:
+                # Try generic name
+                res = subprocess.run(["podman", "image", "list", "--format", "{{.Repository}}"], capture_output=True, text=True)
+                has_toolbox = "toolbox" in res.stdout.lower()
+            else:
+                has_toolbox = True
+            
+            checks.append({"name": "Toolbox Image", "status": "ok" if has_toolbox else "warning", "message": "Image found" if has_toolbox else "Image might be missing (check 'toolbox list')"})
         except:
-            checks.append({"name": "Toolbox Container", "status": "error", "message": "Podman check failed"})
+            checks.append({"name": "Toolbox Image", "status": "error", "message": "Podman check failed"})
             
         return {"checks": checks}
 
