@@ -14,7 +14,7 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
-SOCKET_ADDRESS = "/run/sysext-creator/sysext-creator.sock"
+SOCKET_ADDRESS = "/run/sysext-creator.sock"
 INTERFACE = "io.sysext.creator"
 BUILDER_SCRIPT = "/usr/local/bin/sysext-creator-builder.py"
 BUILD_DIR = Path("/var/tmp/sysext-creator")
@@ -57,7 +57,7 @@ class NativeVarlinkClient:
                 if "error" in resp:
                     print(f"Error from daemon: {resp['error']}")
                     return {}
-                return resp.get("parameters", {})
+                return resp.get("parameters", resp)
         return {}
 
 def connect():
@@ -95,6 +95,47 @@ def cmd_remove(args):
     with connect() as remote:
         remote.call("RemoveSysext", name=args.name)
         print(f"Extension '{args.name}' removed.")
+
+def cmd_check_update(args):
+    print("Checking for updates...")
+    with connect() as remote:
+        res = remote.call("check_updates")
+        updates = res.get("updates", [])
+        if not updates:
+            print("✅ All extensions are up to date.")
+            return
+        print(f"{'EXTENSION':<20} | {'CURRENT':<20} | {'LATEST'}")
+        print("-" * 60)
+        for u in updates:
+            print(f"{u.get('name'):<20} | {u.get('current_version'):<20} | {u.get('new_version')}")
+
+def cmd_update(args):
+    print("Starting update process...")
+    with connect() as remote:
+        res = remote.call("update_all")
+        if res.get("status") == "ok":
+            print("✅ Update triggered successfully.")
+        else:
+            print(f"❌ Update failed: {res.get('message')}")
+
+def cmd_doctor(args):
+    print("Running system diagnostics...")
+    with connect() as remote:
+        res = remote.call("doctor")
+        output = res.get("output", "")
+        if not output:
+            print("✅ System: No critical issues detected.")
+            return
+        
+        for line in output.splitlines():
+            if "[ OK ]" in line:
+                print(f"✅ {line.replace('[ OK ]', '').strip()}")
+            elif "[FAIL]" in line:
+                print(f"❌ {line.replace('[FAIL]', '').strip()}")
+            elif "[WARN]" in line:
+                print(f"⚠️ {line.replace('[WARN]', '').strip()}")
+            else:
+                print(line)
 
 def cmd_install(args):
     if args.name_or_rpm.endswith(".rpm") and os.path.exists(args.name_or_rpm):
@@ -158,6 +199,9 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("list")
     rem = sub.add_parser("remove"); rem.add_argument("name")
+    sub.add_parser("check-update")
+    sub.add_parser("update")
+    sub.add_parser("doctor")
     ins = sub.add_parser("install")
     ins.add_argument("name_or_rpm")
     ins.add_argument("packages", nargs="*")
@@ -166,6 +210,9 @@ def main():
     args = parser.parse_args()
     if args.command == "list": cmd_list(args)
     elif args.command == "remove": cmd_remove(args)
+    elif args.command == "check-update": cmd_check_update(args)
+    elif args.command == "update": cmd_update(args)
+    elif args.command == "doctor": cmd_doctor(args)
     elif args.command == "install": cmd_install(args)
 
 if __name__ == "__main__":

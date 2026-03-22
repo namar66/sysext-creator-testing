@@ -21,16 +21,24 @@ function callDaemon(method: string, params: any = {}): Promise<any> {
     let responseData = '';
 
     client.on('connect', () => {
-      client.write(JSON.stringify({ method, params }));
+      // Send with null byte delimiter
+      client.write(JSON.stringify({ method, params }) + '\0');
     });
 
     client.on('data', (data) => {
       responseData += data.toString();
+      // If we see the null byte, we can close early or just wait for 'end'
+      if (responseData.includes('\0')) {
+        client.end();
+      }
     });
 
     client.on('end', () => {
       try {
-        resolve(JSON.parse(responseData));
+        const msg = responseData.split('\0')[0];
+        const resp = JSON.parse(msg);
+        // Handle Varlink-style parameters or direct status
+        resolve(resp.parameters || resp);
       } catch (e) {
         reject(new Error('Invalid response from daemon'));
       }
@@ -51,19 +59,8 @@ function isValidInput(input: string): boolean {
 
 app.get('/api/extensions', async (req, res) => {
   try {
-    // List installed extensions by checking /var/lib/extensions/
-    const { stdout } = await execAsync('ls /var/lib/extensions/*.raw');
-    const files = stdout.split('\n').filter(f => f.trim() !== '');
-    
-    const extensions = files.map(f => {
-      const name = path.basename(f, '.raw');
-      return { 
-        name, 
-        version: 'active',
-        packages: 'installed' 
-      };
-    });
-    res.json(extensions);
+    const result = await callDaemon('ListExtensions');
+    res.json(result.extensions || []);
   } catch (e) {
     res.json([]);
   }
@@ -81,15 +78,28 @@ app.get('/api/doctor', async (req, res) => {
       .filter((l: string) => l.includes('[ OK ]') || l.includes('[FAIL]') || l.includes('[WARN]'))
       .map((l: string) => {
         const status = l.includes('[ OK ]') ? 'ok' : 'error';
-        const message = l.split('] ')[1];
-        const name = message.split(' ')[0];
+        const parts = l.split('] ');
+        const message = parts.length > 1 ? parts[1] : l;
+        
+        // Try to extract a meaningful name
+        let name = 'System';
+        if (message.startsWith('/')) {
+          name = message.split(' ')[0];
+        } else if (message.includes('Collision:')) {
+          name = 'Collision';
+        } else if (message.includes('No cross-extension')) {
+          name = 'Cross-Extension';
+        } else if (message.includes('extension-release')) {
+          name = 'Release';
+        }
+        
         return { name, status, message };
       });
 
     res.json({
       status: checks.some((c: any) => c.status === 'error') ? 'unhealthy' : 'healthy',
       checks: checks.length > 0 ? checks : [
-        { name: 'System', status: 'ok', message: 'No critical collisions detected.' }
+        { name: 'System', status: 'ok', message: 'No critical issues detected.' }
       ]
     });
   } catch (e) {
@@ -142,6 +152,15 @@ app.post('/api/remove', async (req, res) => {
 
 async function startServer() {
   // Ensure daemon is running (in a real system, this is handled by systemd)
+  // We try to kill any existing daemon to ensure we use the latest code
+  try {
+    await execAsync('sudo pkill -f sysext-daemon.py');
+    // Wait a bit for the socket to be cleaned up
+    await new Promise(resolve => setTimeout(resolve, 500));
+  } catch (e) {
+    // pkill fails if no process found, which is fine
+  }
+
   if (!fs.existsSync(SOCKET_PATH)) {
     console.log('Starting sysext-daemon...');
     exec('sudo python3 /sysext-daemon.py &');

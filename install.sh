@@ -22,6 +22,7 @@ GUI_SRC="sysext-gui.py"
 SYSEXT_CREATOR_ICON="sysext-creator-icon.png"
 KIO_SERVICE_MENU_INSTALL="sysext-creator-local-install.desktop"
 GUI_DESKTOP_INSTALL="sysext-creator-gui.desktop"
+BASH_COMPLETION_SRC="sysext-creator-cli.bash"
 
 case "$1" in
     uninstall|remove|--uninstall)
@@ -39,7 +40,7 @@ case "$1" in
         sudo rm -f "$INSTALL_DIR/sysext-gui.py"
 
         rm -f "$HOME/.local/share/applications/sysext-creator-gui.desktop"
-        rm -f "$HOME/.local/share/applications/sysext-creator-gui.desktop"
+        rm -f "$HOME/.local/share/bash-completion/completions/sysext-cli"
         rm -f "$HOME/.local/share/icons/hicolor/scalable/apps/sysext-creator.png"
         rm -f "$HOME/.local/share/kio/servicemenus/sysext-creator-local-install.desktop"
 
@@ -58,7 +59,7 @@ esac
 echo "=== Sysext-Creator Setup v3.1-rc2 ==="
 
 # --- FILE CHECK ---
-for f in "$DAEMON_SRC" "$BUILDER_SRC" "$CLI_SRC" "$UPDATER_SRC" "$DOCTOR_SRC" "$GUI_SRC" "$KIO_SERVICE_MENU_INSTALL" "$GUI_DESKTOP_INSTALL"; do
+for f in "$DAEMON_SRC" "$BUILDER_SRC" "$CLI_SRC" "$UPDATER_SRC" "$DOCTOR_SRC" "$GUI_SRC" "$KIO_SERVICE_MENU_INSTALL" "$GUI_DESKTOP_INSTALL" "$BASH_COMPLETION_SRC"; do
     if [ ! -f "$f" ]; then
         echo "Error: Missing $f in current directory."
         exit 1
@@ -83,6 +84,11 @@ sudo chmod +x "$INSTALL_DIR"/sysext-doctor.py
 
 # Symlink for CLI
 sudo ln -sf "$INSTALL_DIR/sysext-creator-cli.py" "$INSTALL_DIR/sysext-cli"
+
+echo ">>> Phase 1.1: Installing Bash Completion"
+COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
+mkdir -p "$COMPLETION_DIR"
+cp -f "$BASH_COMPLETION_SRC" "$COMPLETION_DIR/sysext-cli"
 
 echo ">>> Phase 2: Setting up Drop-Zone (Sticky Bit)"
 # DROP-ZONE: Place where user (toolbox) writes .raw images

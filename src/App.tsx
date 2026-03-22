@@ -286,17 +286,32 @@ export default function App() {
 
             {activeTab === 'doctor' && (
               <div className="p-6">
-                <div className="flex items-center gap-4 mb-8">
-                  <Activity className="text-ink" size={32} />
-                  <div>
-                    <h2 className="text-xl font-bold uppercase">System Diagnostics</h2>
-                    <p className="text-xs opacity-50">Checking sysext-creator infrastructure health</p>
+                <div className="flex items-center justify-between mb-8">
+                  <div className="flex items-center gap-4">
+                    <Activity className="text-ink" size={32} />
+                    <div>
+                      <h2 className="text-xl font-bold uppercase">System Diagnostics</h2>
+                      <p className="text-xs opacity-50">Checking sysext-creator infrastructure health</p>
+                    </div>
                   </div>
+                  <button 
+                    onClick={async () => {
+                      setLoading(true);
+                      await fetchDoctor();
+                      setLoading(false);
+                      showToast('Diagnostics complete');
+                    }}
+                    disabled={loading}
+                    className="btn-tech flex items-center gap-2"
+                  >
+                    <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                    Run Doctor
+                  </button>
                 </div>
                 
                 <div className="grid gap-4">
-                  {doctorData?.checks.map((check) => (
-                    <div key={check.name} className="border border-ink p-4 flex items-center gap-4">
+                  {doctorData?.checks.map((check, idx) => (
+                    <div key={`${check.name}-${idx}`} className="border border-ink p-4 flex items-center gap-4">
                       {check.status === 'ok' ? (
                         <CheckCircle2 className="text-green-700" size={20} />
                       ) : (

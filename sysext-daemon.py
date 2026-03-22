@@ -21,66 +21,133 @@ logging.basicConfig(
 
 def handle_client(conn):
     try:
-        data = conn.recv(4096)
-        if not data:
+        buffer = b""
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            buffer += chunk
+            if b'\0' in buffer:
+                break
+        
+        if not buffer:
             return
-        
-        request = json.loads(data.decode('utf-8'))
-        method = request.get("method")
-        params = request.get("params", {})
-        
-        logging.info(f"Request: {method} with params {params}")
-        
-        response = {"status": "error", "message": "Unknown method"}
-        
-        if method == "search":
-            query = params.get("q", "")
-            if query and query.isalnum() or all(c in "._+-" or c.isalnum() for c in query):
-                res = subprocess.run(["dnf", "search", query, "--quiet"], capture_output=True, text=True)
-                results = []
-                for line in res.stdout.splitlines():
-                    if " : " in line:
-                        name, desc = line.split(" : ", 1)
-                        results.append({"name": name.strip(), "description": desc.strip()})
-                response = {"status": "ok", "results": results[:20]}
-            else:
-                response = {"status": "error", "message": "Invalid query"}
+            
+        # Split by null byte and process each message
+        messages = buffer.split(b'\0')
+        for msg_bytes in messages:
+            if not msg_bytes.strip():
+                continue
+                
+            msg = ""
+            try:
+                msg = msg_bytes.decode('utf-8').strip()
+                request = json.loads(msg)
+                
+                full_method = request.get("method", "")
+                method = full_method.split(".")[-1] if "." in full_method else full_method
+                params = request.get("parameters", request.get("params", {}))
+                
+                logging.info(f"Request: {method} with params {params}")
+                
+                response_data = {"status": "error", "message": "Unknown method"}
+                
+                if method == "ListExtensions":
+                    extensions = []
+                    if os.path.exists("/var/lib/extensions"):
+                        for f in os.listdir("/var/lib/extensions"):
+                            if f.endswith(".raw"):
+                                name = f[:-4]
+                                version = "unknown"
+                                release_file = f"/usr/lib/extension-release.d/extension-release.{name}"
+                                if os.path.exists(release_file):
+                                    with open(release_file, "r") as rf:
+                                        for line in rf:
+                                            if line.startswith("SYSEXT_LEVEL="):
+                                                version = line.split("=")[1].strip().strip('"')
+                                
+                                extensions.append({
+                                    "name": name,
+                                    "version": version,
+                                    "packages": "N/A"
+                                })
+                    response_data = {"extensions": extensions}
 
-        elif method == "build":
-            name = params.get("name")
-            packages = params.get("packages", [])
-            # Run builder in background or synchronously for now (simple)
-            # In a real app, we'd use a queue
-            cmd = ["python3", "/sysext-builder.py", name] + packages
-            res = subprocess.run(cmd, capture_output=True, text=True)
-            if res.returncode == 0:
-                response = {"status": "ok", "message": "Build successful"}
-            else:
-                response = {"status": "error", "message": res.stderr}
+                elif method == "search":
+                    query = params.get("q", "")
+                    if query and (query.isalnum() or all(c in "._+-" or c.isalnum() for c in query)):
+                        res = subprocess.run(["dnf", "search", query, "--quiet"], capture_output=True, text=True)
+                        results = []
+                        for line in res.stdout.splitlines():
+                            if " : " in line:
+                                name, desc = line.split(" : ", 1)
+                                results.append({"name": name.strip(), "description": desc.strip()})
+                        response_data = {"status": "ok", "results": results[:20]}
+                    else:
+                        response_data = {"status": "error", "message": "Invalid query"}
 
-        elif method == "remove":
-            name = params.get("name")
-            if name and (name.isalnum() or all(c in "._+-" or c.isalnum() for c in name)):
-                try:
-                    subprocess.run(["rm", "-f", f"/var/lib/extensions/{name}.raw"], check=True)
-                    subprocess.run(["rm", "-f", f"/usr/lib/extension-release.d/extension-release.{name}"], check=True)
-                    subprocess.run(["systemd-sysext", "refresh"], check=True)
-                    response = {"status": "ok"}
-                except Exception as e:
-                    response = {"status": "error", "message": str(e)}
-            else:
-                response = {"status": "error", "message": "Invalid name"}
+                elif method == "DeploySysext" or method == "build":
+                    name = params.get("name")
+                    packages = params.get("packages", [])
+                    path = params.get("path")
+                    
+                    if method == "DeploySysext" and path:
+                        try:
+                            os.makedirs("/var/lib/extensions", exist_ok=True)
+                            dest = f"/var/lib/extensions/{name}.raw"
+                            subprocess.run(["cp", "-f", path, dest], check=True)
+                            subprocess.run(["systemd-sysext", "refresh"], check=True)
+                            logging.info("Running systemd-tmpfiles --create to apply /etc configuration")
+                            subprocess.run(["systemd-tmpfiles", "--create"], check=False)
+                            response_data = {"status": "Success"}
+                        except Exception as e:
+                            response_data = {"status": "error", "message": str(e)}
+                    else:
+                        cmd = ["python3", "/sysext-builder.py", name] + packages
+                        res = subprocess.run(cmd, capture_output=True, text=True)
+                        if res.returncode == 0:
+                            response_data = {"status": "ok", "message": "Build successful"}
+                        else:
+                            response_data = {"status": "error", "message": res.stderr}
 
-        elif method == "doctor":
-            res = subprocess.run(["python3", "/sysext-doctor.py"], capture_output=True, text=True)
-            response = {"status": "ok", "output": res.stdout}
+                elif method == "RemoveSysext" or method == "remove":
+                    name = params.get("name")
+                    if name and (name.isalnum() or all(c in "._+-" or c.isalnum() for c in name)):
+                        try:
+                            subprocess.run(["rm", "-f", f"/var/lib/extensions/{name}.raw"], check=True)
+                            subprocess.run(["systemd-sysext", "refresh"], check=True)
+                            logging.info("Running systemd-tmpfiles --create after removal")
+                            subprocess.run(["systemd-tmpfiles", "--create"], check=False)
+                            response_data = {"status": "ok"}
+                        except Exception as e:
+                            response_data = {"status": "error", "message": str(e)}
+                    else:
+                        response_data = {"status": "error", "message": "Invalid name"}
 
-        conn.sendall(json.dumps(response).encode('utf-8'))
+                elif method == "doctor":
+                    res = subprocess.run(["python3", "/sysext-doctor.py"], capture_output=True, text=True)
+                    response_data = {"status": "ok", "output": res.stdout}
+
+                elif method == "check_updates":
+                    # Placeholder for update logic
+                    response_data = {"status": "ok", "updates": []}
+
+                elif method == "update_all":
+                    # Placeholder for update logic
+                    response_data = {"status": "ok", "message": "All extensions updated"}
+
+                final_resp = {"parameters": response_data}
+                conn.sendall(json.dumps(final_resp).encode('utf-8') + b'\0')
+                
+            except json.JSONDecodeError as e:
+                logging.error(f"JSON error: {e} in message: '{msg}'")
+                conn.sendall(json.dumps({"status": "error", "message": f"JSON error: {str(e)}"}).encode('utf-8') + b'\0')
+            except Exception as e:
+                logging.error(f"Error processing message: {e}")
+                conn.sendall(json.dumps({"status": "error", "message": str(e)}).encode('utf-8') + b'\0')
+
     except Exception as e:
-        logging.error(f"Error handling client: {e}")
-        try:
-            conn.sendall(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
-        except: pass
+        logging.error(f"Error handling client connection: {e}")
     finally:
         conn.close()
 

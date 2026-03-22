@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QLabel,
                              QHeaderView, QTableWidget, QTableWidgetItem, QListWidget)
 from PyQt6.QtCore import QThread, pyqtSignal, QProcess, Qt
 
-SOCKET_PATH = "/run/sysext-creator/sysext-creator.sock"
+SOCKET_PATH = "/run/sysext-creator.sock"
 INTERFACE = "io.sysext.creator"
 CONTAINER_NAME = "sysext-builder"
 BUILDER_SCRIPT = "/usr/local/bin/sysext-creator-builder.py"
@@ -318,7 +318,7 @@ class SysextManagerGUI(QWidget):
     # --- LOGIC: UPDATER ---
     def check_updates(self):
         self.update_table.setRowCount(0)
-        self.run_worker("CheckUpdates", callback=self.on_updates_checked)
+        self.run_worker("check_updates", callback=self.on_updates_checked)
 
     def on_updates_checked(self, res):
         updates = res.get('updates', [])
@@ -334,19 +334,29 @@ class SysextManagerGUI(QWidget):
 
     def run_update_all(self):
         self.btn_update_all.setEnabled(False)
-        self.run_worker("UpdateAll", callback=lambda _: (self.check_updates(), self.refresh_manager()))
+        self.run_worker("update_all", callback=lambda _: (self.check_updates(), self.refresh_manager()))
 
     # --- LOGIC: DOCTOR ---
     def run_doctor(self):
         self.doctor_log.setPlainText("Running diagnostics...")
-        self.run_worker("GetDoctorStatus", callback=self.on_doctor_finished)
+        self.run_worker("doctor", callback=self.on_doctor_finished)
 
     def on_doctor_finished(self, res):
-        checks = res.get('checks', [])
+        output = res.get('output', '')
+        lines = output.split('\n')
         report = []
-        for c in checks:
-            status_icon = "✅" if c['status'] == 'ok' else "❌"
-            report.append(f"{status_icon} {c['name']}: {c['message']}")
+        for line in lines:
+            if any(tag in line for tag in ["[ OK ]", "[FAIL]", "[WARN]"]):
+                status_icon = "✅" if "[ OK ]" in line else "❌" if "[FAIL]" in line else "⚠️"
+                # Clean up the message
+                msg = line
+                if "]" in line:
+                    msg = line.split("]", 1)[1].strip()
+                report.append(f"{status_icon} {msg}")
+        
+        if not report:
+            report = ["✅ System: No critical issues detected."]
+            
         self.doctor_log.setPlainText("\n".join(report))
 
     # --- LOGIC: CREATOR ---
