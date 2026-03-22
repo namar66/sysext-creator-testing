@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Sysext Creator
+Comment=Create and manage System Extensions
+Exec=python3 /usr/local/bin/sysext-gui.py
+Icon=sysext-creator
+Type=Application
+Categories=System;Utility;
+Terminal=false
+StartupNotify=true
